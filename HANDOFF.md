@@ -7,8 +7,8 @@
 
 ## Current State
 
-- **Phases done**: 0, 1, 2, 3, 4, 5, 6
-- **Phase in progress**: None (Phase 6 just completed)
+- **Phases done**: 0, 1, 2, 3, 4, 5, 6, 7
+- **Phase in progress**: None (Phase 7 just completed)
 - **Key decisions made**:
   - FastAPI as web framework
   - SQLAlchemy (async) as ORM with SQLite for dev
@@ -22,14 +22,15 @@
   - Trailing-dot normalized section numbers (e.g., `"2. Physical Specifications"` $\rightarrow$ `"2"`)
   - Browse API Endpoints: Lists top-level sections, node detail, keyword search, and node history diff across versions
   - Selection API Endpoints: Named, version-pinned selections mapping to specific node IDs
-  - **LLM Generation API**: Generates 3-5 QA test case ideas for selections with structured validation and correction retries
-  - **Duplicate Submission Policy**: Returns cached test-case generation immediately by default to reduce API latency/cost, with `force_regenerate=true` cache bypass option
-  - **NoSQL JSON Store**: SQLite JSON extensions in `generations` table to store LLM prompts, outputs, and node content hashes
-  - See [docs/llm_design.md](docs/llm_design.md) for prompting, self-repair retries, and duplicate policies
-- **Known broken/unfinished**: Nothing broken; all 46 tests pass
+  - LLM Generation API: Generates 3-5 QA test case ideas for selections with structured validation and correction retries
+  - Duplicate Submission Policy: Returns cached test-case generation immediately by default to reduce API latency/cost, with `force_regenerate=true` cache bypass option
+  - NoSQL JSON Store: SQLite JSON extensions in `generations` table to store LLM prompts, outputs, and node content hashes
+  - **Staleness / Impact Detection**: Computes changes in selected nodes compared to their counterparts (matched via absolute paths) in the latest document revision, reporting status `up_to_date`, `stale`, or `removed`.
+  - **Retrieval API**: Resolves and retrieves generations by Selection ID or Node ID (which maps cross-version path equivalents).
+  - See [docs/staleness_limits.md](docs/staleness_limits.md) for architectural limitations (formatting noise, parent renaming path failures, semantic equivalence, out-of-scope shifts).
+- **Known broken/unfinished**: None; all 47 tests pass
 - **Next steps**:
-  - **Phase 7**: Staleness / impact detection of generated test cases when document is re-versioned
-  - **Phase 8**: Retrieval API (fetch test cases by selection ID or node ID with staleness status)
+  - Project finalized.
 
 ---
 
@@ -54,13 +55,13 @@ Affine/
 │   ├── routers/
 │   │   ├── __init__.py
 │   │   ├── health.py         # GET /health
-│   │   └── documents.py      # Ingest, Documents, Sections, Search, Node details, History, Selections, Generate
+│   │   └── documents.py      # Ingest, Documents, Sections, Search, Node details, History, Selections, Generate, Retrieval
 │   └── services/
 │       ├── __init__.py
 │       ├── parser.py         # PDFParser — PDF → document tree
 │       ├── ingestion.py      # IngestionService — parse → persist, browse helpers
 │       ├── versioning.py     # VersioningService — matched node tree diffs, history trace
-│       └── generation.py     # GenerationService — LLM test case ideas generator, repair retry loop
+│       └── generation.py     # GenerationService — LLM test cases, repair retry loop, staleness check
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py           # DB table drop & create for tests
@@ -70,7 +71,8 @@ Affine/
 │   ├── test_versioning.py    # 1 test
 │   ├── test_browse.py        # 1 test
 │   ├── test_selections.py    # 3 tests
-│   ├── test_generation.py    # 2 tests (E2E generation cache & self-repair retry validation)
+│   ├── test_generation.py    # 2 tests
+│   ├── test_staleness.py     # 1 test (E2E staleness flag & retrieval verification)
 │   ├── generate_test_pdf.py  # Test PDF generator (Phase 1)
 │   ├── generate_ct200_pdfs.py# Exact CardioTrack CT-200 PDF generator (Phase 3)
 │   └── inspect_pdf.py        # PDF structure inspector
@@ -83,7 +85,8 @@ Affine/
 │   ├── approach.md
 │   ├── parsing_notes.md
 │   ├── matching_strategy.md  # Detailed version matching strategy
-│   └── llm_design.md         # LLM prompting, correction loops, and duplicate policies
+│   ├── llm_design.md         # LLM prompting, correction loops, and duplicate policies
+│   └── staleness_limits.md   # Hashing-based impact limits analysis
 ├── requirements.txt
 ├── pyproject.toml
 ├── .gitignore
@@ -110,6 +113,8 @@ Affine/
 | POST | `/api/v1/selections` | Create a named, version-pinned selection of node IDs |
 | GET | `/api/v1/selections/{id}` | Retrieve a selection, resolving its nodes and text content |
 | POST | `/api/v1/selections/{id}/generate?force_regenerate=false` | Generate QA test cases for a selection (cached by default) |
+| GET | `/api/v1/selections/{id}/generations` | Retrieve all test case generations for a selection, with staleness status |
+| GET | `/api/v1/nodes/{node_id}/generations` | Retrieve generations tracing back to this node ID (or version matches) |
 
 ---
 
@@ -135,3 +140,6 @@ Affine/
 
 ### Phase 6 — LLM generation API ✅
 - **Commit**: `feat: LLM test-case generation with self-repair retry loop` (`7d8945a`)
+
+### Phase 7 — Staleness detection & retrieval API ✅
+- **Commit**: `feat: Staleness detection and cross-version retrieval API` (`8550c54`)
