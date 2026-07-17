@@ -197,4 +197,35 @@ class SelectionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── LLM Generation API schemas ───────────────────────────────────────────
+
+class TestCaseIdea(BaseModel):
+    """Individual generated test case idea for QA verification."""
+
+    id: str = Field(..., description="Unique test case ID, e.g. 'TC001'")
+    name: str = Field(..., description="Short name of the test case")
+    description: str = Field(..., description="Detailed test case instructions/description")
+    expected_result: str = Field(..., description="Expected behavior or verification result")
+    traceability_node_id: int = Field(..., description="The ID of the node this test case originates from")
+
+
+class QAGenerationResponse(BaseModel):
+    """A list of generated test case ideas (matches structured output of LLM)."""
+
+    test_cases: list[TestCaseIdea] = Field(default_factory=list)
+
+
+class GenerationDetailResponse(BaseModel):
+    """Details of a generation, including the parsed test cases."""
+
+    id: int
+    selection_id: int
+    prompt: str
+    test_cases: list[TestCaseIdea] = Field(default_factory=list)
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+
 

@@ -172,6 +172,32 @@ class SelectionORM(Base):
         secondary=selection_nodes,
         backref="selections",
     )
+    generations: Mapped[list["GenerationORM"]] = relationship(
+        back_populates="selection", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Selection(id={self.id}, name='{self.name}')>"
+
+
+class GenerationORM(Base):
+    """An LLM-generated set of QA test cases for a specific selection."""
+
+    __tablename__ = "generations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    selection_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("selections.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    test_cases: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-serialized list of test cases
+    node_hashes: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-serialized map of node_id -> content_hash
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    # Relationships
+    selection: Mapped["SelectionORM"] = relationship(back_populates="generations")
+
+    def __repr__(self) -> str:
+        return f"<Generation(id={self.id}, selection_id={self.selection_id})>"

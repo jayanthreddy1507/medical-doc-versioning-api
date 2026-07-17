@@ -15,4 +15,7 @@ from app.schemas.document import (  # noqa: F401
     NodeHistoryEntry,
     SelectionCreate,
     SelectionResponse,
+    TestCaseIdea,
+    QAGenerationResponse,
+    GenerationDetailResponse,
 )

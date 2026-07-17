@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,9 +20,11 @@ from app.schemas.document import (
     NodeHistoryResponse,
     SelectionCreate,
     SelectionResponse,
+    GenerationDetailResponse,
 )
 from app.services.ingestion import IngestionService
 from app.services.versioning import VersioningService
+from app.services.generation import GenerationService
 
 router = APIRouter(tags=["documents"])
 
@@ -435,4 +438,59 @@ async def get_node_selection(
             )
             for n in sorted_nodes
         ],
+    )
+
+
+# Singleton generation service instance
+_generation_service = GenerationService()
+
+
+@router.post("/selections/{selection_id}/generate", response_model=GenerationDetailResponse)
+async def generate_selection_test_cases(
+    selection_id: int,
+    force_regenerate: bool = False,
+    db: AsyncSession = Depends(get_db),
+) -> GenerationDetailResponse:
+    """Generate QA test case ideas for a version-pinned selection.
+
+    By default, returns cached results if already generated. Pass force_regenerate=true
+    to trigger a new model call and overwrite the cached generation.
+    """
+    # Fetch selection with joined nodes relationship
+    from sqlalchemy.orm import selectinload
+    sel_res = await db.execute(
+        select(SelectionORM)
+        .where(SelectionORM.id == selection_id)
+        .options(selectinload(SelectionORM.nodes))
+    )
+    selection = sel_res.scalar_one_or_none()
+    if not selection:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Selection {selection_id} not found",
+        )
+
+    try:
+        generation = await _generation_service.generate_test_cases(
+            db=db,
+            selection=selection,
+            force_regenerate=force_regenerate,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate test cases: {str(e)}",
+        )
+
+    # Parse JSON serialized test cases back to TestCaseIdea objects
+    test_cases_list = json.loads(generation.test_cases)["test_cases"]
+
+    return GenerationDetailResponse(
+        id=generation.id,
+        selection_id=generation.selection_id,
+        prompt=generation.prompt,
+        test_cases=test_cases_list,
+        created_at=generation.created_at,
     )
