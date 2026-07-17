@@ -14,6 +14,9 @@ from app.schemas.document import (
     VersionDetailResponse,
     VersionSummary,
     DiffSummaryResponse,
+    NodeDetailResponse,
+    NodeSearchResponse,
+    NodeHistoryResponse,
 )
 from app.services.ingestion import IngestionService
 from app.services.versioning import VersioningService
@@ -227,3 +230,109 @@ async def diff_document_versions(
         )
 
     return DiffSummaryResponse(**diff_summary)
+
+
+# ── Browse API Router Endpoints ──────────────────────────────────────────
+
+@router.get("/documents/{document_id}/sections", response_model=list[NodeSearchResponse])
+async def list_top_level_sections(
+    document_id: int,
+    version: int | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> list[NodeSearchResponse]:
+    """List all top-level sections (level 1 nodes) of a document.
+
+    If version is not provided, defaults to the latest version.
+    """
+    # Verify document exists
+    doc_result = await db.execute(
+        select(DocumentORM).where(DocumentORM.id == document_id)
+    )
+    doc = doc_result.scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+    # Resolve latest version if not provided
+    if version is None:
+        latest_result = await db.execute(
+            select(func.max(VersionORM.version_number)).where(
+                VersionORM.document_id == document_id
+            )
+        )
+        version = latest_result.scalar()
+        if version is None:
+            return []
+
+    sections = await _ingestion_service.get_top_level_sections(
+        db=db,
+        document_id=document_id,
+        version_number=version,
+    )
+    return [NodeSearchResponse(**s) for s in sections]
+
+
+@router.get("/nodes/{node_id}", response_model=NodeDetailResponse)
+async def get_node_details(
+    node_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> NodeDetailResponse:
+    """Retrieve details for a specific node by ID, including its immediate children."""
+    node_details = await _ingestion_service.get_node_by_id(db, node_id)
+    if node_details is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+    return NodeDetailResponse(**node_details)
+
+
+@router.get("/documents/{document_id}/search", response_model=list[NodeSearchResponse])
+async def search_nodes(
+    document_id: int,
+    q: str,
+    version: int | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> list[NodeSearchResponse]:
+    """Search/filter nodes by title or content within a specific document version.
+
+    If version is not provided, defaults to the latest version.
+    """
+    # Verify document exists
+    doc_result = await db.execute(
+        select(DocumentORM).where(DocumentORM.id == document_id)
+    )
+    doc = doc_result.scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+    # Resolve latest version if not provided
+    if version is None:
+        latest_result = await db.execute(
+            select(func.max(VersionORM.version_number)).where(
+                VersionORM.document_id == document_id
+            )
+        )
+        version = latest_result.scalar()
+        if version is None:
+            return []
+
+    results = await _ingestion_service.search_nodes(
+        db=db,
+        document_id=document_id,
+        query=q,
+        version_number=version,
+    )
+    return [NodeSearchResponse(**r) for r in results]
+
+
+@router.get("/nodes/{node_id}/diff", response_model=NodeHistoryResponse)
+async def get_node_diff_history(
+    node_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> NodeHistoryResponse:
+    """Retrieve the change history of a specific node across all versions of the document.
+
+    Matches the node by path/title across revisions to verify if it was modified, added,
+    or removed, returning a unified diff summary of content modifications.
+    """
+    history = await _versioning_service.get_node_history(db, node_id)
+    if history is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+    return NodeHistoryResponse(**history)

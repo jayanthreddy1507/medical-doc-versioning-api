@@ -7,8 +7,8 @@
 
 ## Current State
 
-- **Phases done**: 0, 1, 2, 3
-- **Phase in progress**: None (Phase 3 just completed)
+- **Phases done**: 0, 1, 2, 3, 4
+- **Phase in progress**: None (Phase 4 just completed)
 - **Key decisions made**:
   - FastAPI as web framework
   - SQLAlchemy (async) as ORM with SQLite for dev
@@ -16,18 +16,17 @@
   - PyMuPDF for PDF parsing (per-span font metadata)
   - Adjacency list pattern for node tree in DB (parent_id self-join)
   - Documents → Versions → Nodes hierarchy in DB
-  - **Hierarchical Path + Title Match Strategy** for version comparison
+  - Hierarchical Path + Title Match Strategy for version comparison
   - Gesture/Gestalt pattern matching via SequenceMatcher for fuzzy title matching ($70\%$ threshold)
   - Unified diff summaries comparing `content_hash` across versions
   - Trailing-dot normalized section numbers (e.g., `"2. Physical Specifications"` $\rightarrow$ `"2"`)
-  - See [docs/parsing_notes.md](docs/parsing_notes.md) for irregularity catalog
-  - See [docs/matching_strategy.md](docs/matching_strategy.md) for versioning/matching strategy details
-- **Known broken/unfinished**: Nothing broken; all 40 tests pass
+  - **Browse API Endpoints**: Lists top-level sections, node detail (including children), keyword search, and node history diff across versions
+- **Known broken/unfinished**: Nothing broken; all 41 tests pass
 - **Next steps**:
-  - **Phase 4**: Selection API (version-pinned selection of node IDs)
-  - **Phase 5**: LLM-powered test-case generation API (structured output validation)
-  - **Phase 6**: Staleness / impact detection of generated test cases when document is re-versioned
-  - **Phase 7**: Retrieval API (fetch test cases by selection ID or node ID)
+  - **Phase 5**: Selection API (version-pinned selections of node IDs)
+  - **Phase 6**: LLM-powered test-case generation API (structured output validation)
+  - **Phase 7**: Staleness / impact detection of generated test cases when document is re-versioned
+  - **Phase 8**: Retrieval API (fetch test cases by selection ID or node ID)
 
 ---
 
@@ -48,23 +47,24 @@ Affine/
 │   ├── schemas/
 │   │   ├── __init__.py
 │   │   ├── health.py         # Health check response schema
-│   │   └── document.py       # Ingest, Document, Version, Node, Diff schemas
+│   │   └── document.py       # Ingest, Document, Version, Node, Diff, Browse schemas
 │   ├── routers/
 │   │   ├── __init__.py
 │   │   ├── health.py         # GET /health
-│   │   └── documents.py      # Ingest, Documents, Versions, Diff GET endpoints
+│   │   └── documents.py      # Ingest, Documents, Sections, Search, Node details, History
 │   └── services/
 │       ├── __init__.py
 │       ├── parser.py         # PDFParser — PDF → document tree
-│       ├── ingestion.py      # IngestionService — parse → persist
-│       └── versioning.py     # VersioningService — matched node tree diffs
+│       ├── ingestion.py      # IngestionService — parse → persist, browse helpers
+│       └── versioning.py     # VersioningService — matched node tree diffs, history trace
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py           # DB table drop & create for tests
 │   ├── test_health.py        # 1 test
 │   ├── test_parser.py        # 28 tests
 │   ├── test_ingest.py        # 10 tests
-│   ├── test_versioning.py    # 1 test (CardioTrack CT-200 v1/v2 complete flow)
+│   ├── test_versioning.py    # 1 test
+│   ├── test_browse.py        # 1 test (E2E browse API validation)
 │   ├── generate_test_pdf.py  # Test PDF generator (Phase 1)
 │   ├── generate_ct200_pdfs.py# Exact CardioTrack CT-200 PDF generator (Phase 3)
 │   └── inspect_pdf.py        # PDF structure inspector
@@ -96,6 +96,10 @@ Affine/
 | GET | `/api/v1/documents/{id}/versions` | List versions for a document |
 | GET | `/api/v1/documents/{id}/versions/{n}` | Full version detail with tree |
 | GET | `/api/v1/documents/{id}/diff?v1=1&v2=2` | Generate version tree comparison diff |
+| GET | `/api/v1/documents/{id}/sections?version=1`| List top-level sections (defaults to latest) |
+| GET | `/api/v1/nodes/{id}` | Get node details (includes immediate children) |
+| GET | `/api/v1/documents/{id}/search?q=query` | Case-insensitive substring search (defaults to latest) |
+| GET | `/api/v1/nodes/{id}/diff` | Track changes/diff history of a node across versions |
 
 ---
 
@@ -111,12 +115,14 @@ Affine/
 - **Commit**: `feat: persistence layer with SQLite + ingestion endpoint` (`62e52cc`)
 
 ### Phase 3 — Versioning & Matching Strategy ✅
-- **Commit**: `feat: version matching strategy and document diff endpoint`
+- **Commit**: `feat: version matching strategy and document diff endpoint` (`e1ee8fe`)
+
+### Phase 4 — Browse API ✅
+- **Commit**: `feat: Browse API endpoints and change status tracing`
 - **What**:
-  - `app/services/versioning.py` — Hierarchical path-based matching with SequenceMatcher fallback
-  - `app/routers/documents.py` — `GET /documents/{document_id}/diff` endpoint
-  - `app/schemas/document.py` — Pydantic diff response schemas
-  - `tests/generate_ct200_pdfs.py` — Exact V1/V2 CardioTrack CT-200 PDF generator
-  - `tests/test_versioning.py` — E2E integration test diffing CT-200 versions
-  - `docs/matching_strategy.md` — Detail matching edge cases and "where it breaks"
-- **Tests**: 40 passing (1 health + 28 parser + 10 ingest + 1 E2E versioning diff)
+  - `app/services/ingestion.py` — Added `get_top_level_sections`, `get_node_by_id`, and `search_nodes`
+  - `app/services/versioning.py` — Added `get_node_history` tracing life cycles and inline diffs
+  - `app/routers/documents.py` — Exposed all 4 Browse API router endpoints
+  - `tests/test_browse.py` — Full E2E validation of browse capabilities on CT-200 v1/v2
+  - `README.md` — Added detailed API reference and curl examples
+- **Tests**: 42 passing (1 health + 28 parser + 10 ingest + 1 versioning + 2 browse)

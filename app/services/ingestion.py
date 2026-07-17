@@ -240,3 +240,125 @@ class IngestionService:
                 node_map[node.parent_id]["children"].append(node_dict)
 
         return root
+
+    async def get_top_level_sections(
+        self, db: AsyncSession, document_id: int, version_number: int
+    ) -> list[dict]:
+        """Get top-level sections (level 1) of a specific document version."""
+        # Find the version ID first
+        result = await db.execute(
+            select(VersionORM).where(
+                VersionORM.document_id == document_id,
+                VersionORM.version_number == version_number,
+            )
+        )
+        version = result.scalar_one_or_none()
+        if not version:
+            return []
+
+        # Get level 1 nodes for this version
+        node_result = await db.execute(
+            select(NodeORM)
+            .where(NodeORM.version_id == version.id, NodeORM.level == 1)
+            .order_by(NodeORM.reading_order)
+        )
+        nodes = node_result.scalars().all()
+
+        return [
+            {
+                "id": node.id,
+                "section_number": node.section_number,
+                "title": node.title,
+                "content": node.content,
+                "level": node.level,
+                "node_type": node.node_type,
+                "page_number": node.page_number,
+                "content_hash": node.content_hash,
+                "reading_order": node.reading_order,
+                "children": []  # Flat list of top-level sections, children excluded
+            }
+            for node in nodes
+        ]
+
+    async def get_node_by_id(self, db: AsyncSession, node_id: int) -> Optional[dict]:
+        """Retrieve a specific node by ID, including its immediate children."""
+        result = await db.execute(select(NodeORM).where(NodeORM.id == node_id))
+        node = result.scalar_one_or_none()
+        if not node:
+            return None
+
+        # Fetch immediate children
+        child_result = await db.execute(
+            select(NodeORM)
+            .where(NodeORM.parent_id == node_id)
+            .order_by(NodeORM.reading_order)
+        )
+        children = child_result.scalars().all()
+
+        return {
+            "id": node.id,
+            "section_number": node.section_number,
+            "title": node.title,
+            "content": node.content,
+            "level": node.level,
+            "node_type": node.node_type,
+            "page_number": node.page_number,
+            "content_hash": node.content_hash,
+            "reading_order": node.reading_order,
+            "children": [
+                {
+                    "id": c.id,
+                    "section_number": c.section_number,
+                    "title": c.title,
+                    "content": c.content,
+                    "level": c.level,
+                    "node_type": c.node_type,
+                    "page_number": c.page_number,
+                    "content_hash": c.content_hash,
+                    "reading_order": c.reading_order,
+                    "children": []
+                }
+                for c in children
+            ]
+        }
+
+    async def search_nodes(
+        self, db: AsyncSession, document_id: int, query: str, version_number: int
+    ) -> list[dict]:
+        """Search/filter nodes by title or content in a specific document version."""
+        result = await db.execute(
+            select(VersionORM).where(
+                VersionORM.document_id == document_id,
+                VersionORM.version_number == version_number,
+            )
+        )
+        version = result.scalar_one_or_none()
+        if not version:
+            return []
+
+        # Find matching nodes
+        search_query = f"%{query}%"
+        node_result = await db.execute(
+            select(NodeORM)
+            .where(
+                NodeORM.version_id == version.id,
+                (NodeORM.title.like(search_query) | NodeORM.content.like(search_query))
+            )
+            .order_by(NodeORM.reading_order)
+        )
+        nodes = node_result.scalars().all()
+
+        return [
+            {
+                "id": node.id,
+                "section_number": node.section_number,
+                "title": node.title,
+                "content": node.content,
+                "level": node.level,
+                "node_type": node.node_type,
+                "page_number": node.page_number,
+                "content_hash": node.content_hash,
+                "reading_order": node.reading_order,
+            }
+            for node in nodes
+        ]

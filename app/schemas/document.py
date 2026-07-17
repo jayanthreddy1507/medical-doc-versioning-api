@@ -119,3 +119,61 @@ class DiffSummaryResponse(BaseModel):
     unchanged_count: int
     diff_tree: Optional[NodeDiffResponse] = None
 
+
+# ── Browse API response models ───────────────────────────────────────────
+
+class NodeDetailResponse(BaseModel):
+    """Detailed response for a single node, including its immediate children."""
+
+    id: int
+    section_number: str = ""
+    title: str = ""
+    content: str = ""
+    level: int = 0
+    node_type: str = "heading"
+    page_number: int = 0
+    content_hash: str = ""
+    reading_order: int = 0
+    children: list[NodeResponse] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+class NodeSearchResponse(BaseModel):
+    """Simple response for search results."""
+
+    id: int
+    section_number: str = ""
+    title: str = ""
+    content: str = ""
+    level: int = 0
+    node_type: str = "heading"
+    page_number: int = 0
+    content_hash: str = ""
+    reading_order: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class NodeHistoryEntry(BaseModel):
+    """Representing the state of a node in a specific version."""
+
+    version_number: int
+    node_id: Optional[int] = None
+    section_number: str = ""
+    title: str = ""
+    content_hash: str = ""
+    status: str  # "unchanged", "added", "removed", "modified", "not_present"
+    content_diff: Optional[str] = None
+
+
+class NodeHistoryResponse(BaseModel):
+    """Full node history across versions."""
+
+    node_id: int
+    current_version: int
+    path: str
+    has_changed: bool
+    history: list[NodeHistoryEntry]
+
+

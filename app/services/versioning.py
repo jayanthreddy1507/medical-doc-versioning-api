@@ -341,3 +341,129 @@ class VersioningService:
 
         for child in node.children:
             self._collect_counts(child, counts)
+
+    async def get_node_history(
+        self, db: AsyncSession, node_id: int
+    ) -> Optional[dict[str, Any]]:
+        """Trace a node's changes across all versions of the document."""
+        # 1. Fetch the target node
+        result = await db.execute(select(NodeORM).where(NodeORM.id == node_id))
+        node = result.scalar_one_or_none()
+        if not node:
+            return None
+
+        # 2. Get its version details
+        from app.models.db_models import VersionORM
+        v_result = await db.execute(select(VersionORM).where(VersionORM.id == node.version_id))
+        current_version = v_result.scalar_one_or_none()
+        if not current_version:
+            return None
+
+        # 3. Compute hierarchical path string for node (in its version)
+        # Fetch all nodes of current_version to map paths in-memory
+        curr_version_nodes = await db.execute(
+            select(NodeORM).where(NodeORM.version_id == current_version.id)
+        )
+        curr_nodes = curr_version_nodes.scalars().all()
+        curr_node_map = {n.id: n for n in curr_nodes}
+
+        def compute_path(n_obj, nodes_map):
+            parts = []
+            curr = n_obj
+            while curr is not None:
+                parts.insert(0, curr.title)
+                curr = nodes_map.get(curr.parent_id) if curr.parent_id else None
+            return "/" + "/".join(parts)
+
+        target_path = compute_path(node, curr_node_map)
+
+        # 4. Fetch all versions for the document
+        versions_result = await db.execute(
+            select(VersionORM)
+            .where(VersionORM.document_id == current_version.document_id)
+            .order_by(VersionORM.version_number)
+        )
+        all_versions = versions_result.scalars().all()
+
+        # 5. Trace node across all versions
+        history_entries = []
+        has_changed = False
+        prev_node = None
+
+        for ver in all_versions:
+            # Fetch all nodes for this version
+            ver_nodes_res = await db.execute(select(NodeORM).where(NodeORM.version_id == ver.id))
+            ver_nodes = ver_nodes_res.scalars().all()
+            ver_node_map = {n.id: n for n in ver_nodes}
+
+            # Find matching node in this version by path
+            match_node = None
+            for vn in ver_nodes:
+                vn_path = compute_path(vn, ver_node_map)
+                if vn_path == target_path:
+                    match_node = vn
+                    break
+
+            # Fallback to section number + title signature if path match fails
+            if not match_node:
+                for vn in ver_nodes:
+                    if (
+                        vn.section_number == node.section_number
+                        and vn.title.strip().lower() == node.title.strip().lower()
+                    ):
+                        match_node = vn
+                        break
+
+            # Determine change status relative to previous version in chronological sequence
+            if match_node is None:
+                # Not present in this version
+                status = "not_present"
+                if prev_node is not None:
+                    status = "removed"
+                    has_changed = True
+                history_entries.append({
+                    "version_number": ver.version_number,
+                    "node_id": None,
+                    "section_number": "",
+                    "title": "",
+                    "content_hash": "",
+                    "status": status,
+                    "content_diff": None,
+                })
+                prev_node = None
+            else:
+                if prev_node is None:
+                    # Added in this version
+                    status = "added"
+                    if ver.version_number > 1:
+                        has_changed = True
+                    content_diff = None
+                else:
+                    # Compare content with previous version
+                    if prev_node.content_hash == match_node.content_hash:
+                        status = "unchanged"
+                        content_diff = None
+                    else:
+                        status = "modified"
+                        has_changed = True
+                        content_diff = self._generate_content_diff(prev_node.content, match_node.content)
+
+                history_entries.append({
+                    "version_number": ver.version_number,
+                    "node_id": match_node.id,
+                    "section_number": match_node.section_number,
+                    "title": match_node.title,
+                    "content_hash": match_node.content_hash,
+                    "status": status,
+                    "content_diff": content_diff,
+                })
+                prev_node = match_node
+
+        return {
+            "node_id": node_id,
+            "current_version": current_version.version_number,
+            "path": target_path,
+            "has_changed": has_changed,
+            "history": history_entries,
+        }
+

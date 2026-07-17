@@ -9,4 +9,8 @@ from app.schemas.document import (  # noqa: F401
     VersionSummary,
     NodeDiffResponse,
     DiffSummaryResponse,
+    NodeDetailResponse,
+    NodeSearchResponse,
+    NodeHistoryResponse,
+    NodeHistoryEntry,
 )
