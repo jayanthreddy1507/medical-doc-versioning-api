@@ -7,8 +7,8 @@
 
 ## Current State
 
-- **Phases done**: 0, 1, 2, 3, 4, 5, 6, 7
-- **Phase in progress**: None (Phase 7 just completed)
+- **Phases done**: 0, 1, 2, 3, 4, 5, 6, 7, 8
+- **Phase in progress**: None (All phases complete)
 - **Key decisions made**:
   - FastAPI as web framework
   - SQLAlchemy (async) as ORM with SQLite for dev
@@ -25,12 +25,12 @@
   - LLM Generation API: Generates 3-5 QA test case ideas for selections with structured validation and correction retries
   - Duplicate Submission Policy: Returns cached test-case generation immediately by default to reduce API latency/cost, with `force_regenerate=true` cache bypass option
   - NoSQL JSON Store: SQLite JSON extensions in `generations` table to store LLM prompts, outputs, and node content hashes
-  - **Staleness / Impact Detection**: Computes changes in selected nodes compared to their counterparts (matched via absolute paths) in the latest document revision, reporting status `up_to_date`, `stale`, or `removed`.
-  - **Retrieval API**: Resolves and retrieves generations by Selection ID or Node ID (which maps cross-version path equivalents).
-  - See [docs/staleness_limits.md](docs/staleness_limits.md) for architectural limitations (formatting noise, parent renaming path failures, semantic equivalence, out-of-scope shifts).
+  - Staleness / Impact Detection: Computes changes in selected nodes compared to their counterparts (matched via absolute paths) in the latest document revision, reporting status `up_to_date`, `stale`, or `removed`.
+  - Retrieval API: Resolves and retrieves generations by Selection ID or Node ID (which maps cross-version path equivalents).
+  - **E2E Demo Flow**: Native python demonstration script `demo_flow.py` hit all endpoints end-to-end to verify full project specs.
+  - See [docs/approach.md](docs/approach.md) for master parser notes, versioning matches, prompts, staleness limits, and the decision log answers.
 - **Known broken/unfinished**: None; all 47 tests pass
-- **Next steps**:
-  - Project finalized.
+- **Next steps**: Project fully finalized and ready for submission review.
 
 ---
 
@@ -72,7 +72,7 @@ Affine/
 │   ├── test_browse.py        # 1 test
 │   ├── test_selections.py    # 3 tests
 │   ├── test_generation.py    # 2 tests
-│   ├── test_staleness.py     # 1 test (E2E staleness flag & retrieval verification)
+│   ├── test_staleness.py     # 1 test
 │   ├── generate_test_pdf.py  # Test PDF generator (Phase 1)
 │   ├── generate_ct200_pdfs.py# Exact CardioTrack CT-200 PDF generator (Phase 3)
 │   └── inspect_pdf.py        # PDF structure inspector
@@ -82,16 +82,17 @@ Affine/
 │   ├── ct200_manual_v2.pdf   # Real CT-200 v2 PDF
 │   └── test_manual.pdf
 ├── docs/
-│   ├── approach.md
+│   ├── approach.md           # Master approach decisions, notes & decision log
 │   ├── parsing_notes.md
-│   ├── matching_strategy.md  # Detailed version matching strategy
-│   ├── llm_design.md         # LLM prompting, correction loops, and duplicate policies
-│   └── staleness_limits.md   # Hashing-based impact limits analysis
+│   ├── matching_strategy.md
+│   ├── llm_design.md
+│   └── staleness_limits.md
 ├── requirements.txt
 ├── pyproject.toml
 ├── .gitignore
 ├── HANDOFF.md                # ← You are here
-└── README.md
+├── README.md
+└── demo_flow.py              # E2E test client demonstration script
 ```
 
 ---
@@ -143,3 +144,6 @@ Affine/
 
 ### Phase 7 — Staleness detection & retrieval API ✅
 - **Commit**: `feat: Staleness detection and cross-version retrieval API` (`8550c54`)
+
+### Phase 8 — Submission prep ✅
+- **Commit**: `docs: compile master approach document, README, and demo flow script` (`e5a0266`)
