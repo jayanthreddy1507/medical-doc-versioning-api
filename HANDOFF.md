@@ -7,24 +7,24 @@
 
 ## Current State
 
-- **Phases done**: 0, 1
-- **Phase in progress**: None (Phase 1 just completed)
+- **Phases done**: 0, 1, 2
+- **Phase in progress**: None (Phase 2 just completed)
 - **Key decisions made**:
   - FastAPI as web framework
   - SQLAlchemy (async) as ORM with SQLite for dev
   - Pydantic v2 for schemas/validation
-  - **PyMuPDF** for PDF parsing (per-span font metadata, 10-50× faster than pdfplumber)
-  - Font-size + bold-flag heuristics for heading detection
-  - Stack-based tree builder handling out-of-order, skipped levels, duplicates
-  - SHA-256 content hashing per node for version comparison
-  - See [docs/parsing_notes.md](docs/parsing_notes.md) for full irregularity catalog
+  - PyMuPDF for PDF parsing (per-span font metadata)
+  - Adjacency list pattern for node tree in DB (parent_id self-join)
+  - Documents → Versions → Nodes hierarchy in DB
+  - File uploads saved to `data/` with sanitized filenames
+  - Version auto-increment per document on re-upload
+  - See [docs/parsing_notes.md](docs/parsing_notes.md) for irregularity catalog
   - See [docs/approach.md](docs/approach.md) for architecture decisions
-- **Known broken/unfinished**: Nothing broken; all 29 tests pass
+- **Known broken/unfinished**: Nothing broken; all 39 tests pass
 - **Next steps**:
-  - **Phase 2**: Build versioning logic (`diff_nodes()` to compare two parsed trees)
-  - **Phase 2**: Store parsed documents and versions in the database (SQLAlchemy ORM models)
-  - **Phase 2**: Add API endpoint to upload and parse a PDF
-  - **Phase 3**: Version matching and diff summary
+  - **Phase 3**: Version matching / diff (`diff_nodes()` to compare two parsed trees)
+  - **Phase 3**: Diff summary endpoint (e.g. `GET /documents/{id}/diff?v1=1&v2=2`)
+  - **Phase 3**: Implement `versioning.py::diff_nodes()` comparing content hashes
 
 ---
 
@@ -40,34 +40,76 @@ Affine/
 │   ├── models/
 │   │   ├── __init__.py       # Model import hub
 │   │   ├── base.py           # DeclarativeBase
-│   │   └── document.py       # DocumentNode, ParsedDocument, FontInfo, NodeType
+│   │   ├── db_models.py      # DocumentORM, VersionORM, NodeORM tables
+│   │   └── document.py       # DocumentNode, ParsedDocument (in-memory tree)
 │   ├── schemas/
 │   │   ├── __init__.py
-│   │   └── health.py         # Health check response schema
+│   │   ├── health.py         # Health check response schema
+│   │   └── document.py       # Ingest, Document, Version, Node schemas
 │   ├── routers/
 │   │   ├── __init__.py
-│   │   └── health.py         # /health endpoint
+│   │   ├── health.py         # GET /health
+│   │   └── documents.py      # POST /ingest, GET /documents, versions
 │   └── services/
 │       ├── __init__.py
-│       └── parser.py         # PDFParser — PDF → document tree
+│       ├── parser.py         # PDFParser — PDF → document tree
+│       └── ingestion.py      # IngestionService — parse → persist
 ├── tests/
 │   ├── __init__.py
-│   ├── test_health.py        # Health endpoint smoke test
-│   ├── test_parser.py        # 28 parser tests (irregularities, hashing, etc.)
-│   ├── generate_test_pdf.py  # Generates test PDF with known irregularities
-│   └── inspect_pdf.py        # Raw PDF structure inspector (diagnostic)
+│   ├── conftest.py           # DB table creation for tests
+│   ├── test_health.py        # 1 test
+│   ├── test_parser.py        # 28 tests
+│   ├── test_ingest.py        # 10 tests
+│   ├── generate_test_pdf.py  # Test PDF generator
+│   └── inspect_pdf.py        # PDF structure inspector
 ├── data/
 │   ├── .gitkeep
-│   └── test_manual.pdf       # Generated test PDF (4 pages, 5 irregularities)
+│   └── test_manual.pdf
 ├── docs/
-│   ├── approach.md           # High-level design decisions
-│   └── parsing_notes.md      # Every irregularity found + parser architecture
+│   ├── approach.md
+│   └── parsing_notes.md
 ├── requirements.txt
 ├── pyproject.toml
 ├── .gitignore
-├── HANDOFF.md                # ← You are here
+├── HANDOFF.md
 └── README.md
 ```
+
+## DB Schema
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  documents   │     │   versions   │     │    nodes     │
+├──────────────┤     ├──────────────┤     ├──────────────┤
+│ id (PK)      │◄────│ document_id  │     │ id (PK)      │
+│ filename     │     │ id (PK)      │◄────│ version_id   │
+│ title        │     │ version_num  │     │ parent_id    │──┐
+│ created_at   │     │ total_pages  │     │ section_num  │  │
+│ updated_at   │     │ node_count   │     │ title        │  │
+└──────────────┘     │ irregulars   │     │ content      │  │
+                     │ created_at   │     │ level        │  │
+                     └──────────────┘     │ node_type    │  │
+                                          │ page_number  │  │
+                                          │ content_hash │  │
+                                          │ reading_order│  │
+                                          │ font_*       │  │
+                                          └──────────────┘  │
+                                               ▲            │
+                                               └────────────┘
+                                            (self-join: adjacency list)
+```
+
+---
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/health` | Health check |
+| POST | `/api/v1/ingest` | Upload & parse PDF |
+| GET | `/api/v1/documents` | List all documents |
+| GET | `/api/v1/documents/{id}/versions` | List versions for a document |
+| GET | `/api/v1/documents/{id}/versions/{n}` | Full version detail with tree |
 
 ---
 
@@ -75,21 +117,19 @@ Affine/
 
 ### Phase 0 — Repo Scaffolding ✅
 - **Commit**: `chore: project scaffolding` (`14f338a`)
-- **What**: Folder structure, FastAPI skeleton, SQLAlchemy base, health endpoint
 - **Tests**: 1 passing
 
 ### Phase 1 — PDF Parsing & Hierarchy Extraction ✅
-- **Commit**: `feat: PDF parsing with hierarchy extraction and irregularity handling`
-- **What**:
-  - `app/models/document.py` — Tree schema: `DocumentNode`, `ParsedDocument`, `FontInfo`, `NodeType`
-  - `app/services/parser.py` — Full PDF parser with PyMuPDF
-  - `tests/test_parser.py` — 28 tests across 7 test classes
-  - `tests/generate_test_pdf.py` — Test PDF generator with 5 embedded irregularities
-  - `docs/parsing_notes.md` — Complete irregularity catalog
-- **Irregularities detected**:
-  1. Out-of-order sections (3.4 before 3.3) — preserved in reading order
-  2. Skipped heading levels (2.1.1.1 without 2.1.1) — placed under nearest ancestor
-  3. Duplicate numbering (two 4.2 sections) — disambiguated with `_dup1` suffix
-  4. Tables with mixed font styles — detected via y-coordinate clustering
-  5. Multi-page content — page number tracked per heading
+- **Commit**: `feat: PDF parsing with hierarchy extraction and irregularity handling` (`d10a233`)
 - **Tests**: 29 passing (28 parser + 1 health)
+
+### Phase 2 — Persistence Layer ✅
+- **Commit**: `feat: persistence layer with SQLite + ingestion endpoint`
+- **What**:
+  - `app/models/db_models.py` — ORM: DocumentORM, VersionORM, NodeORM
+  - `app/schemas/document.py` — Pydantic schemas for all endpoints
+  - `app/services/ingestion.py` — Parse → persist orchestrator
+  - `app/routers/documents.py` — POST /ingest + GET endpoints
+  - `tests/test_ingest.py` — 10 ingestion/retrieval tests
+  - `tests/conftest.py` — DB table setup for tests
+- **Tests**: 39 passing (1 health + 28 parser + 10 ingest)
