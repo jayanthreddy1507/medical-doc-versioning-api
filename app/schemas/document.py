@@ -177,3 +177,24 @@ class NodeHistoryResponse(BaseModel):
     history: list[NodeHistoryEntry]
 
 
+# ── Selection API response models ──────────────────────────────────────────
+
+class SelectionCreate(BaseModel):
+    """Payload to create a new named, version-pinned selection of nodes."""
+
+    name: str = Field(..., description="Unique name of the selection")
+    node_ids: list[int] = Field(..., description="List of node IDs to select")
+
+
+class SelectionResponse(BaseModel):
+    """Details of a saved selection, including the version-pinned nodes."""
+
+    id: int
+    name: str
+    created_at: datetime
+    nodes: list[NodeSearchResponse] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+

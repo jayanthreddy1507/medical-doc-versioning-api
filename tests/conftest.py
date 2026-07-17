@@ -5,7 +5,7 @@ import pytest
 from app.database import engine
 from app.models.base import Base
 # Import all ORM models so Base.metadata knows about them
-from app.models import DocumentORM, NodeORM, VersionORM  # noqa: F401
+from app.models import DocumentORM, NodeORM, VersionORM, SelectionORM  # noqa: F401
 
 
 @pytest.fixture(scope="session", autouse=True)

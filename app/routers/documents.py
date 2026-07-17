@@ -7,7 +7,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.db_models import DocumentORM, VersionORM
+from app.models.db_models import DocumentORM, VersionORM, SelectionORM, NodeORM
 from app.schemas.document import (
     DocumentSummary,
     IngestResponse,
@@ -17,6 +17,8 @@ from app.schemas.document import (
     NodeDetailResponse,
     NodeSearchResponse,
     NodeHistoryResponse,
+    SelectionCreate,
+    SelectionResponse,
 )
 from app.services.ingestion import IngestionService
 from app.services.versioning import VersioningService
@@ -336,3 +338,101 @@ async def get_node_diff_history(
     if history is None:
         raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
     return NodeHistoryResponse(**history)
+
+
+# ── Selection API Router Endpoints ───────────────────────────────────────
+
+@router.post("/selections", response_model=SelectionResponse, status_code=201)
+async def create_node_selection(
+    payload: SelectionCreate,
+    db: AsyncSession = Depends(get_db),
+) -> SelectionResponse:
+    """Create a named, version-pinned selection of document nodes.
+
+    Verifies that all node IDs exist. The nodes remain bound to their specific
+    revisions, protecting the selection against future document re-ingestions.
+    """
+    if not payload.node_ids:
+        raise HTTPException(status_code=400, detail="Node IDs list cannot be empty")
+
+    # Fetch and verify all nodes exist
+    nodes = []
+    for nid in payload.node_ids:
+        node_res = await db.execute(select(NodeORM).where(NodeORM.id == nid))
+        node = node_res.scalar_one_or_none()
+        if not node:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Node ID {nid} does not exist",
+            )
+        nodes.append(node)
+
+    # Create selection record
+    selection = SelectionORM(name=payload.name)
+    selection.nodes.extend(nodes)
+    db.add(selection)
+    await db.flush()  # Retrieve selection.id and selection.created_at
+
+    return SelectionResponse(
+        id=selection.id,
+        name=selection.name,
+        created_at=selection.created_at,
+        nodes=[
+            NodeSearchResponse(
+                id=n.id,
+                section_number=n.section_number,
+                title=n.title,
+                content=n.content,
+                level=n.level,
+                node_type=n.node_type,
+                page_number=n.page_number,
+                content_hash=n.content_hash,
+                reading_order=n.reading_order,
+            )
+            for n in nodes
+        ],
+    )
+
+
+@router.get("/selections/{selection_id}", response_model=SelectionResponse)
+async def get_node_selection(
+    selection_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> SelectionResponse:
+    """Retrieve a version-pinned selection by ID, resolving its nodes and text."""
+    # Fetch selection with joined nodes relationship
+    from sqlalchemy.orm import selectinload
+    sel_res = await db.execute(
+        select(SelectionORM)
+        .where(SelectionORM.id == selection_id)
+        .options(selectinload(SelectionORM.nodes))
+    )
+    selection = sel_res.scalar_one_or_none()
+    if not selection:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Selection {selection_id} not found",
+        )
+
+    # Sort nodes by reading order
+    sorted_nodes = sorted(selection.nodes, key=lambda n: n.reading_order)
+
+    return SelectionResponse(
+        id=selection.id,
+        name=selection.name,
+        created_at=selection.created_at,
+        nodes=[
+            NodeSearchResponse(
+                id=n.id,
+                section_number=n.section_number,
+                title=n.title,
+                content=n.content,
+                level=n.level,
+                node_type=n.node_type,
+                page_number=n.page_number,
+                content_hash=n.content_hash,
+                reading_order=n.reading_order,
+            )
+            for n in sorted_nodes
+        ],
+    )

@@ -28,6 +28,8 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    Column,
+    Table,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -132,3 +134,44 @@ class NodeORM(Base):
 
     def __repr__(self) -> str:
         return f"<Node(id={self.id}, section='{self.section_number}', title='{self.title[:30]}')>"
+
+
+# ── Selection and Node Mapping Table ──────────────────────────────────────
+
+selection_nodes = Table(
+    "selection_nodes",
+    Base.metadata,
+    Column(
+        "selection_id",
+        Integer,
+        ForeignKey("selections.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "node_id",
+        Integer,
+        ForeignKey("nodes.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
+class SelectionORM(Base):
+    """A named, version-pinned selection of document nodes."""
+
+    __tablename__ = "selections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    # Relationships
+    nodes: Mapped[list["NodeORM"]] = relationship(
+        secondary=selection_nodes,
+        backref="selections",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Selection(id={self.id}, name='{self.name}')>"

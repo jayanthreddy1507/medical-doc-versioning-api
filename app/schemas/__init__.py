@@ -13,4 +13,6 @@ from app.schemas.document import (  # noqa: F401
     NodeSearchResponse,
     NodeHistoryResponse,
     NodeHistoryEntry,
+    SelectionCreate,
+    SelectionResponse,
 )
