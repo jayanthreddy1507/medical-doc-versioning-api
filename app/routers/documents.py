@@ -13,8 +13,10 @@ from app.schemas.document import (
     IngestResponse,
     VersionDetailResponse,
     VersionSummary,
+    DiffSummaryResponse,
 )
 from app.services.ingestion import IngestionService
+from app.services.versioning import VersioningService
 
 router = APIRouter(tags=["documents"])
 
@@ -182,3 +184,46 @@ def _parse_irregularities(raw: str | None) -> list[str]:
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return [raw]
+
+
+# Singleton versioning service instance
+_versioning_service = VersioningService()
+
+
+@router.get("/documents/{document_id}/diff", response_model=DiffSummaryResponse)
+async def diff_document_versions(
+    document_id: int,
+    v1: int,
+    v2: int,
+    db: AsyncSession = Depends(get_db),
+) -> DiffSummaryResponse:
+    """Compare two versions of a document to find added, removed, modified, or unchanged sections.
+
+    Returns the counts of changes and a hierarchical diff tree.
+    """
+    # Verify document exists
+    doc_result = await db.execute(
+        select(DocumentORM).where(DocumentORM.id == document_id)
+    )
+    if doc_result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document {document_id} not found",
+        )
+
+    try:
+        diff_summary = await _versioning_service.diff_versions(
+            db=db,
+            document_id=document_id,
+            v1_num=v1,
+            v2_num=v2,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate diff: {str(e)}",
+        )
+
+    return DiffSummaryResponse(**diff_summary)

@@ -17,6 +17,7 @@ async def create_test_tables():
     as the app (configured via DATABASE_URL).
     """
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield
     # Optionally drop tables after tests

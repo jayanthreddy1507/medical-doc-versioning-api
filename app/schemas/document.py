@@ -84,3 +84,38 @@ class VersionDetailResponse(BaseModel):
     tree: Optional[NodeResponse] = None
 
     model_config = {"from_attributes": True}
+
+
+# ── Diff and Version Matching ────────────────────────────────────────────
+
+class NodeDiffResponse(BaseModel):
+    """A single node in the hierarchical diff tree showing its change status."""
+
+    id: Optional[int] = None  # None for removed nodes (since they only exist in v1 database)
+    section_number: str = ""
+    title: str = ""
+    content: str = ""
+    level: int = 0
+    node_type: str = "heading"
+    page_number: int = 0
+    content_hash: str = ""
+    reading_order: int = 0
+    status: str  # "unchanged", "added", "removed", "modified"
+    content_diff: Optional[str] = None  # Textual description of changes
+    children: list[NodeDiffResponse] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+class DiffSummaryResponse(BaseModel):
+    """Summary of all changes between two document versions."""
+
+    document_id: int
+    v1_version_number: int
+    v2_version_number: int
+    added_count: int
+    removed_count: int
+    modified_count: int
+    unchanged_count: int
+    diff_tree: Optional[NodeDiffResponse] = None
+

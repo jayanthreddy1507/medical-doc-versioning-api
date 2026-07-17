@@ -39,9 +39,10 @@ from app.models.document import (
 )
 
 # ── Section number regex ────────────────────────────────────────────────
-# Matches patterns like "1", "1.1", "2.1.1.1", etc. at start of text
+# Matches patterns like "1", "1.1", "2.1.1.1", etc. at start of text.
+# Supports optional trailing dot like "1. Device Overview"
 SECTION_NUMBER_RE = re.compile(
-    r"^(\d+(?:\.\d+)*)\s+"
+    r"^(\d+(?:\.\d+)*\.?)\s+"
 )
 
 
@@ -362,7 +363,7 @@ class PDFParser:
         match = SECTION_NUMBER_RE.match(line.text)
         if match and line.is_bold and line.font_size > self.BODY_MAX_SIZE:
             # Has section number AND looks like a heading
-            section_num = match.group(1)
+            section_num = match.group(1).rstrip(".")
             return DocumentNode.parse_level_from_number(section_num)
 
         # Title detection (no section number, very large)
@@ -447,7 +448,7 @@ class PDFParser:
             # Parse section number and title
             match = SECTION_NUMBER_RE.match(line.text)
             if match:
-                section_number = match.group(1)
+                section_number = match.group(1).rstrip(".")
                 title = line.text[match.end():].strip()
             else:
                 section_number = ""
