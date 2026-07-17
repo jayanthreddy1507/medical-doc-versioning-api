@@ -7,8 +7,8 @@
 
 ## Current State
 
-- **Phases done**: 0, 1, 2, 3, 4
-- **Phase in progress**: None (Phase 4 just completed)
+- **Phases done**: 0, 1, 2, 3, 4, 5, 6
+- **Phase in progress**: None (Phase 6 just completed)
 - **Key decisions made**:
   - FastAPI as web framework
   - SQLAlchemy (async) as ORM with SQLite for dev
@@ -20,13 +20,16 @@
   - Gesture/Gestalt pattern matching via SequenceMatcher for fuzzy title matching ($70\%$ threshold)
   - Unified diff summaries comparing `content_hash` across versions
   - Trailing-dot normalized section numbers (e.g., `"2. Physical Specifications"` $\rightarrow$ `"2"`)
-  - **Browse API Endpoints**: Lists top-level sections, node detail (including children), keyword search, and node history diff across versions
-- **Known broken/unfinished**: Nothing broken; all 41 tests pass
+  - Browse API Endpoints: Lists top-level sections, node detail, keyword search, and node history diff across versions
+  - Selection API Endpoints: Named, version-pinned selections mapping to specific node IDs
+  - **LLM Generation API**: Generates 3-5 QA test case ideas for selections with structured validation and correction retries
+  - **Duplicate Submission Policy**: Returns cached test-case generation immediately by default to reduce API latency/cost, with `force_regenerate=true` cache bypass option
+  - **NoSQL JSON Store**: SQLite JSON extensions in `generations` table to store LLM prompts, outputs, and node content hashes
+  - See [docs/llm_design.md](docs/llm_design.md) for prompting, self-repair retries, and duplicate policies
+- **Known broken/unfinished**: Nothing broken; all 46 tests pass
 - **Next steps**:
-  - **Phase 5**: Selection API (version-pinned selections of node IDs)
-  - **Phase 6**: LLM-powered test-case generation API (structured output validation)
   - **Phase 7**: Staleness / impact detection of generated test cases when document is re-versioned
-  - **Phase 8**: Retrieval API (fetch test cases by selection ID or node ID)
+  - **Phase 8**: Retrieval API (fetch test cases by selection ID or node ID with staleness status)
 
 ---
 
@@ -42,21 +45,22 @@ Affine/
 │   ├── models/
 │   │   ├── __init__.py       # Model import hub
 │   │   ├── base.py           # DeclarativeBase
-│   │   ├── db_models.py      # DocumentORM, VersionORM, NodeORM tables
+│   │   ├── db_models.py      # DocumentORM, VersionORM, NodeORM, SelectionORM, GenerationORM
 │   │   └── document.py       # DocumentNode, ParsedDocument (in-memory tree)
 │   ├── schemas/
 │   │   ├── __init__.py
 │   │   ├── health.py         # Health check response schema
-│   │   └── document.py       # Ingest, Document, Version, Node, Diff, Browse schemas
+│   │   └── document.py       # Ingest, Document, Version, Node, Diff, Browse, Selection, Generation schemas
 │   ├── routers/
 │   │   ├── __init__.py
 │   │   ├── health.py         # GET /health
-│   │   └── documents.py      # Ingest, Documents, Sections, Search, Node details, History
+│   │   └── documents.py      # Ingest, Documents, Sections, Search, Node details, History, Selections, Generate
 │   └── services/
 │       ├── __init__.py
 │       ├── parser.py         # PDFParser — PDF → document tree
 │       ├── ingestion.py      # IngestionService — parse → persist, browse helpers
-│       └── versioning.py     # VersioningService — matched node tree diffs, history trace
+│       ├── versioning.py     # VersioningService — matched node tree diffs, history trace
+│       └── generation.py     # GenerationService — LLM test case ideas generator, repair retry loop
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py           # DB table drop & create for tests
@@ -64,7 +68,9 @@ Affine/
 │   ├── test_parser.py        # 28 tests
 │   ├── test_ingest.py        # 10 tests
 │   ├── test_versioning.py    # 1 test
-│   ├── test_browse.py        # 1 test (E2E browse API validation)
+│   ├── test_browse.py        # 1 test
+│   ├── test_selections.py    # 3 tests
+│   ├── test_generation.py    # 2 tests (E2E generation cache & self-repair retry validation)
 │   ├── generate_test_pdf.py  # Test PDF generator (Phase 1)
 │   ├── generate_ct200_pdfs.py# Exact CardioTrack CT-200 PDF generator (Phase 3)
 │   └── inspect_pdf.py        # PDF structure inspector
@@ -76,7 +82,8 @@ Affine/
 ├── docs/
 │   ├── approach.md
 │   ├── parsing_notes.md
-│   └── matching_strategy.md  # Detailed version matching strategy
+│   ├── matching_strategy.md  # Detailed version matching strategy
+│   └── llm_design.md         # LLM prompting, correction loops, and duplicate policies
 ├── requirements.txt
 ├── pyproject.toml
 ├── .gitignore
@@ -100,6 +107,9 @@ Affine/
 | GET | `/api/v1/nodes/{id}` | Get node details (includes immediate children) |
 | GET | `/api/v1/documents/{id}/search?q=query` | Case-insensitive substring search (defaults to latest) |
 | GET | `/api/v1/nodes/{id}/diff` | Track changes/diff history of a node across versions |
+| POST | `/api/v1/selections` | Create a named, version-pinned selection of node IDs |
+| GET | `/api/v1/selections/{id}` | Retrieve a selection, resolving its nodes and text content |
+| POST | `/api/v1/selections/{id}/generate?force_regenerate=false` | Generate QA test cases for a selection (cached by default) |
 
 ---
 
@@ -118,11 +128,10 @@ Affine/
 - **Commit**: `feat: version matching strategy and document diff endpoint` (`e1ee8fe`)
 
 ### Phase 4 — Browse API ✅
-- **Commit**: `feat: Browse API endpoints and change status tracing`
-- **What**:
-  - `app/services/ingestion.py` — Added `get_top_level_sections`, `get_node_by_id`, and `search_nodes`
-  - `app/services/versioning.py` — Added `get_node_history` tracing life cycles and inline diffs
-  - `app/routers/documents.py` — Exposed all 4 Browse API router endpoints
-  - `tests/test_browse.py` — Full E2E validation of browse capabilities on CT-200 v1/v2
-  - `README.md` — Added detailed API reference and curl examples
-- **Tests**: 42 passing (1 health + 28 parser + 10 ingest + 1 versioning + 2 browse)
+- **Commit**: `feat: Browse API endpoints and change status tracing` (`0202b5b`)
+
+### Phase 5 — Selection API ✅
+- **Commit**: `feat: Named, version-pinned Selection API` (`3e839b6`)
+
+### Phase 6 — LLM generation API ✅
+- **Commit**: `feat: LLM test-case generation with self-repair retry loop` (`7d8945a`)

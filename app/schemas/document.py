@@ -227,5 +227,32 @@ class GenerationDetailResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Retrieval and Staleness API schemas ──────────────────────────────────
+
+class NodeStalenessInfo(BaseModel):
+    """Staleness status for a single node included in the selection."""
+
+    node_id: int
+    section_number: str = ""
+    title: str = ""
+    status: str  # "up_to_date", "stale", "removed"
+
+
+class GenerationRetrievalResponse(BaseModel):
+    """Test case generation detail enriched with active staleness status."""
+
+    id: int
+    selection_id: int
+    prompt: str
+    test_cases: list[TestCaseIdea] = Field(default_factory=list)
+    created_at: datetime
+    is_stale: bool
+    latest_version_number: int
+    staleness_details: list[NodeStalenessInfo] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+
 
 

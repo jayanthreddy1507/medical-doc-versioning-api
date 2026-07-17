@@ -21,6 +21,7 @@ from app.schemas.document import (
     SelectionCreate,
     SelectionResponse,
     GenerationDetailResponse,
+    GenerationRetrievalResponse,
 )
 from app.services.ingestion import IngestionService
 from app.services.versioning import VersioningService
@@ -494,3 +495,59 @@ async def generate_selection_test_cases(
         test_cases=test_cases_list,
         created_at=generation.created_at,
     )
+
+
+@router.get("/selections/{selection_id}/generations", response_model=list[GenerationRetrievalResponse])
+async def get_selection_test_case_generations(
+    selection_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> list[GenerationRetrievalResponse]:
+    """Retrieve all QA test cases generated for a specific selection, with staleness status."""
+    # Verify selection exists
+    from sqlalchemy.orm import selectinload
+    sel_res = await db.execute(
+        select(SelectionORM)
+        .where(SelectionORM.id == selection_id)
+        .options(selectinload(SelectionORM.nodes))
+    )
+    selection = sel_res.scalar_one_or_none()
+    if not selection:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Selection {selection_id} not found",
+        )
+
+    # Fetch generations ordered by creation date
+    from app.models.db_models import GenerationORM
+    gen_res = await db.execute(
+        select(GenerationORM)
+        .where(GenerationORM.selection_id == selection_id)
+        .order_by(GenerationORM.created_at.desc())
+    )
+    generations = gen_res.scalars().all()
+
+    # Calculate staleness details for each generation
+    results = []
+    for gen in generations:
+        stale_info = await _generation_service.check_staleness(db, gen)
+        results.append(GenerationRetrievalResponse(**stale_info))
+
+    return results
+
+
+@router.get("/nodes/{node_id}/generations", response_model=list[GenerationRetrievalResponse])
+async def get_node_test_case_generations(
+    node_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> list[GenerationRetrievalResponse]:
+    """Retrieve all test case generations that trace back to this node (or version matches) across versions."""
+    # Verify node exists
+    node_res = await db.execute(select(NodeORM).where(NodeORM.id == node_id))
+    if node_res.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Node {node_id} not found",
+        )
+
+    generations = await _generation_service.get_generations_by_node_id(db, node_id)
+    return [GenerationRetrievalResponse(**gen) for gen in generations]
